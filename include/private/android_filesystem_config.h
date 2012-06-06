@@ -69,6 +69,19 @@
 #define AID_INET          3003  /* can create AF_INET and AF_INET6 sockets */
 #define AID_NET_RAW       3004  /* can create raw INET sockets */
 #define AID_NET_ADMIN     3005  /* can configure interfaces and routing tables. */
+#define AID_QCOM_ONCRPC   3006  /* can read/write /dev/oncrpc files */
+
+#if defined(MOTOROLA_UIDS)
+#define AID_MOT_ACCY      9000  /* access to accessory */
+#define AID_MOT_PWRIC     9001  /* power IC */
+#define AID_MOT_USB       9002  /* mot usb */
+#define AID_MOT_DRM       9003  /* can access DRM resource. */
+#define AID_MOT_TCMD      9004  /* mot_tcmd */
+#define AID_MOT_SEC_RTC   9005  /* mot cpcap rtc */
+#define AID_MOT_TOMBSTONE 9006
+#define AID_MOT_TPAPI     9007  /* mot_tpapi */
+#define AID_MOT_SECCLKD   9008  /* mot_secclkd */
+#endif // MOTOROLA_UIDS
 
 #define AID_MISC          9998  /* access to misc storage */
 #define AID_NOBODY        9999
@@ -104,6 +117,7 @@ static const struct android_id_info android_ids[] = {
     { "diag",      AID_DIAG, },
     { "net_bt_admin", AID_NET_BT_ADMIN, },
     { "net_bt",    AID_NET_BT, },
+    { "qcom_oncrpc", AID_QCOM_ONCRPC, },
     { "sdcard_rw", AID_SDCARD_RW, },
     { "vpn",       AID_VPN, },
     { "keystore",  AID_KEYSTORE, },
@@ -112,6 +126,17 @@ static const struct android_id_info android_ids[] = {
     { "inet",      AID_INET, },
     { "net_raw",   AID_NET_RAW, },
     { "net_admin", AID_NET_ADMIN, },
+#if defined(MOTOROLA_UIDS)
+    { "mot_accy",  AID_MOT_ACCY, },
+    { "mot_pwric", AID_MOT_PWRIC, },
+    { "mot_usb",   AID_MOT_USB, },
+    { "mot_drm",   AID_MOT_DRM, },
+    { "mot_tcmd",  AID_MOT_TCMD, },
+    { "mot_sec_rtc",  AID_MOT_SEC_RTC, },
+    { "mot_tombstone", AID_MOT_TOMBSTONE, },
+    { "mot_tpapi",  AID_MOT_TPAPI, },
+    { "mot_secclkd",  AID_MOT_SECCLKD, },
+#endif
     { "misc",      AID_MISC, },
     { "nobody",    AID_NOBODY, },
 };
@@ -194,6 +219,7 @@ static struct fs_path_config android_files[] = {
 		/* the following file is INTENTIONALLY set-uid, and IS included
 		 * in user builds. */
     { 06750, AID_ROOT,      AID_SHELL,     "system/bin/run-as" },
+    { 06755, AID_ROOT,      AID_ROOT,      "system/xbin/hcitool" },
     { 00755, AID_ROOT,      AID_SHELL,     "system/bin/*" },
     { 00755, AID_ROOT,      AID_SHELL,     "system/xbin/*" },
     { 00755, AID_ROOT,      AID_SHELL,     "system/vendor/bin/*" },

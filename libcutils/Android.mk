@@ -23,8 +23,6 @@ else
 endif
 hostSmpFlag := -DANDROID_SMP=0
 
-COMPILE_FLAGS := -O2
-
 commonSources := \
 	array.c \
 	hashmap.c \
@@ -89,7 +87,7 @@ LOCAL_MODULE := libcutils
 LOCAL_SRC_FILES := $(commonSources) $(commonHostSources) dlmalloc_stubs.c
 LOCAL_LDLIBS := -lpthread
 LOCAL_STATIC_LIBRARIES := liblog
-LOCAL_CFLAGS += $(hostSmpFlag) $(COMPILE_FLAGS)
+LOCAL_CFLAGS += $(hostSmpFlag)
 include $(BUILD_HOST_STATIC_LIBRARY)
 
 
@@ -101,38 +99,51 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := libcutils
 LOCAL_SRC_FILES := $(commonSources) $(commonHostSources) memory.c dlmalloc_stubs.c
 LOCAL_LDLIBS := -lpthread
-LOCAL_SHARED_LIBRARIES := liblog 
-LOCAL_CFLAGS += $(targetSmpFlag) $(COMPILE_FLAGS)
+LOCAL_SHARED_LIBRARIES := liblog
+LOCAL_CFLAGS += $(targetSmpFlag)
 include $(BUILD_SHARED_LIBRARY)
 
 else #!sim
 
 # Shared and static library for target
 # ========================================================
-include $(CLEAR_VARS)
-LOCAL_MODULE := libcutils
-LOCAL_SRC_FILES := $(commonSources) ashmem-dev.c mq.c
 
+targetSources := ashmem-dev.c mq.c
 ifeq ($(TARGET_ARCH),arm)
-LOCAL_SRC_FILES += memset32.S
+targetSources += arch-arm/memset32.S
 else  # !arm
 ifeq ($(TARGET_ARCH),sh)
-LOCAL_SRC_FILES += memory.c atomic-android-sh.c
+targetSources += memory.c atomic-android-sh.c
 else  # !sh
+ifeq ($(TARGET_ARCH_VARIANT),x86-atom)
+LOCAL_CFLAGS += -DHAVE_MEMSET16 -DHAVE_MEMSET32
+LOCAL_SRC_FILES += arch-x86/android_memset16.S arch-x86/android_memset32.S memory.c
+else # !x86-atom
 LOCAL_SRC_FILES += memory.c
+endif # !x86-atom
 endif # !sh
 endif # !arm
 
+include $(CLEAR_VARS)
+LOCAL_MODULE := libcutils
+LOCAL_SRC_FILES := $(commonSources) $(targetSources)
+LOCAL_CFLAGS += $(targetCFLAGS) $(targetSmpFlag)
+
 LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
 LOCAL_STATIC_LIBRARIES := liblog
-LOCAL_CFLAGS += $(targetSmpFlag) $(COMPILE_FLAGS)
 include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
 LOCAL_MODULE := libcutils
+ifeq ($(BOARD_NEEDS_CUTILS_LOG),true)
 LOCAL_WHOLE_STATIC_LIBRARIES := libcutils
+else
+LOCAL_SRC_FILES := $(commonSources) $(targetSources)
+endif
+LOCAL_CFLAGS += $(targetCFLAGS) $(targetSmpFlag)
+
+LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
 LOCAL_SHARED_LIBRARIES := liblog
-LOCAL_CFLAGS += $(targetSmpFlag) $(COMPILE_FLAGS)
 include $(BUILD_SHARED_LIBRARY)
 
 endif #!sim
