@@ -17,8 +17,6 @@
 // No user serviceable parts in here...
 // ---------------------------------------------------------------------------
 
-#pragma GCC visibility push(hidden)
-
 namespace android {
 
 /*!
@@ -183,7 +181,5 @@ private:
 
 
 // ---------------------------------------------------------------------------
-
-#pragma GCC visibility pop
 
 #endif // ANDROID_VECTOR_IMPL_H

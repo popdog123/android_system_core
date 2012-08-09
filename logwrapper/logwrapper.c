@@ -54,7 +54,7 @@ void parent(const char *tag, int seg_fault_on_exit, int parent_read) {
     int sz;
 
     char *btag = basename(tag);
-    if (!btag) btag = (char*) tag;
+    if (!strlen(btag)) btag = (char*) tag;
 
     while ((sz = read(parent_read, &buffer[b], sizeof(buffer) - 1 - b)) > 0) {
 

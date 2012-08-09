@@ -296,6 +296,11 @@ static void readLogLines(log_device_t* devices)
                         fprintf(stderr, "read: Unexpected EOF!\n");
                         exit(EXIT_FAILURE);
                     }
+                    else if (entry->entry.len != ret - sizeof(struct logger_entry)) {
+                        fprintf(stderr, "read: unexpected length. Expected %d, got %d\n",
+                                entry->entry.len, ret - sizeof(struct logger_entry));
+                        exit(EXIT_FAILURE);
+                    }
 
                     entry->entry.msg[entry->entry.len] = '\0';
 
@@ -323,7 +328,7 @@ static void readLogLines(log_device_t* devices)
 
                 // the caller requested to just dump the log and exit
                 if (g_nonblock) {
-                    exit(0);
+                    return;
                 }
             } else {
                 // print all that aren't the last in their list
@@ -402,8 +407,9 @@ static void show_help(const char *cmd)
                     "  -d              dump the log and then exit (don't block)\n"
                     "  -t <count>      print only the most recent <count> lines (implies -d)\n"
                     "  -g              get the size of the log's ring buffer and exit\n"
-                    "  -b <buffer>     request alternate ring buffer\n"
-                    "                  ('main' (default), 'radio', 'events')\n"
+                    "  -b <buffer>     Request alternate ring buffer, 'main', 'system', 'radio'\n"
+                    "                  or 'events'. Multiple -b parameters are allowed and the\n"
+                    "                  results are interleaved. The default is -b main -b system.\n"
                     "  -B              output the log in binary\n"
                     "  -C              colored output");
 
@@ -663,14 +669,14 @@ int main(int argc, char **argv)
     }
 
     if (!devices) {
-        devices = new log_device_t(strdup("/dev/"LOGGER_LOG_MAIN), false, 'm');
+        devices = new log_device_t(strdup("/dev/" LOGGER_LOG_MAIN), false, 'm');
         android::g_devCount = 1;
         int accessmode =
                   (mode & O_RDONLY) ? R_OK : 0
                 | (mode & O_WRONLY) ? W_OK : 0;
         // only add this if it's available
-        if (0 == access("/dev/"LOGGER_LOG_SYSTEM, accessmode)) {
-            devices->next = new log_device_t(strdup("/dev/"LOGGER_LOG_SYSTEM), false, 's');
+        if (0 == access("/dev/" LOGGER_LOG_SYSTEM, accessmode)) {
+            devices->next = new log_device_t(strdup("/dev/" LOGGER_LOG_SYSTEM), false, 's');
             android::g_devCount++;
         }
     }
@@ -774,10 +780,10 @@ int main(int argc, char **argv)
     }
 
     if (getLogSize) {
-        return 0;
+        exit(0);
     }
     if (clearLog) {
-        return 0;
+        exit(0);
     }
 
     //LOG_EVENT_INT(10, 12345);

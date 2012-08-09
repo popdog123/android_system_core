@@ -2,28 +2,35 @@ LOCAL_PATH:= $(call my-dir)
 include $(CLEAR_VARS)
 
 TOOLS := \
+	ls \
+	mount \
 	cat \
 	ps \
 	kill \
+	ln \
 	insmod \
 	rmmod \
 	lsmod \
 	ifconfig \
 	setconsole \
+	rm \
+	mkdir \
 	rmdir \
-	reboot \
 	getevent \
 	sendevent \
 	date \
 	wipe \
 	sync \
+	umount \
 	start \
 	stop \
 	notify \
 	cmp \
+	dmesg \
 	route \
 	hd \
 	dd \
+	df \
 	getprop \
 	setprop \
 	watchprops \
@@ -32,9 +39,12 @@ TOOLS := \
 	renice \
 	printenv \
 	smd \
+	chmod \
+	chown \
 	newfs_msdos \
 	netstat \
 	ioctl \
+	mv \
 	schedtop \
 	top \
 	iftop \
@@ -42,30 +52,28 @@ TOOLS := \
 	uptime \
 	vmstat \
 	nandread \
-	ionice 
+	ionice \
+	touch \
+	lsof
 
-ifndef TINY_TOOLBOX
-    TOOLS += \
-        dmesg \
-        mkdir \
-        ln \
-        ls \
-        mount \
-        rm \
-        umount \
-        df \
-        chmod \
-        chown \
-        mv \
-        lsof
+ifneq (,$(filter userdebug eng,$(TARGET_BUILD_VARIANT)))
+TOOLS += r
 endif
 
 LOCAL_SRC_FILES:= \
+	dynarray.c \
 	toolbox.c \
 	$(patsubst %,%.c,$(TOOLS))
 
-LOCAL_STATIC_LIBRARIES := libreboot
-LOCAL_SHARED_LIBRARIES := libcutils libc
+TOOLS += reboot
+
+ifeq ($(BOARD_USES_BOOTMENU),true)
+	LOCAL_SRC_FILES += ../../../external/bootmenu/libreboot/reboot.c
+else
+	LOCAL_SRC_FILES += reboot.c
+endif
+
+LOCAL_SHARED_LIBRARIES := libcutils libc libusbhost
 
 LOCAL_MODULE:= toolbox
 

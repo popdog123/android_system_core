@@ -61,6 +61,11 @@
 #define DBG1(x...)
 #endif
 
+/* The max bulk size for linux is 16384 which is defined
+ * in drivers/usb/core/devio.c.
+ */
+#define MAX_USBFS_BULK_SIZE (16 * 1024)
+
 struct usb_handle 
 {
     char fname[64];
@@ -134,11 +139,10 @@ static int filter_usb_device(int fd, char *ptr, int len, int writable,
         ctrl.bRequestType = USB_DIR_IN|USB_TYPE_STANDARD|USB_RECIP_DEVICE;
         ctrl.bRequest = USB_REQ_GET_DESCRIPTOR;
         ctrl.wValue = (USB_DT_STRING << 8) | dev->iSerialNumber;
-        //language ID (en-us) for serial number string
-        ctrl.wIndex = 0x0409;
+        ctrl.wIndex = 0;
         ctrl.wLength = sizeof(buffer);
         ctrl.data = buffer;
-        ctrl.timeout = 50;
+	ctrl.timeout = 50;
 
         result = ioctl(fd, USBDEVFS_CONTROL, &ctrl);
         if (result > 0) {
@@ -290,7 +294,7 @@ int usb_write(usb_handle *h, const void *_data, int len)
     
     while(len > 0) {
         int xfer;
-        xfer = (len > 4096) ? 4096 : len;
+        xfer = (len > MAX_USBFS_BULK_SIZE) ? MAX_USBFS_BULK_SIZE : len;
         
         bulk.ep = h->ep_out;
         bulk.len = xfer;
@@ -324,7 +328,7 @@ int usb_read(usb_handle *h, void *_data, int len)
     }
     
     while(len > 0) {
-        int xfer = (len > 4096) ? 4096 : len;
+        int xfer = (len > MAX_USBFS_BULK_SIZE) ? MAX_USBFS_BULK_SIZE : len;
         
         bulk.ep = h->ep_in;
         bulk.len = xfer;

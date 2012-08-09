@@ -381,17 +381,58 @@ static inline char * strip_end(char *str)
 int android_log_processLogBuffer(struct logger_entry *buf,
                                  AndroidLogEntry *entry)
 {
-    size_t tag_len;
-
     entry->tv_sec = buf->sec;
     entry->tv_nsec = buf->nsec;
-    entry->priority = buf->msg[0];
     entry->pid = buf->pid;
     entry->tid = buf->tid;
+
+    /*
+     * format: <priority:1><tag:N>\0<message:N>\0
+     *
+     * tag str
+     *   starts at buf->msg+1
+     * msg
+     *   starts at buf->msg+1+len(tag)+1
+     *
+     * The message may have been truncated by the kernel log driver.
+     * When that happens, we must null-terminate the message ourselves.
+     */
+    if (buf->len < 3) {
+        // An well-formed entry must consist of at least a priority
+        // and two null characters
+        fprintf(stderr, "+++ LOG: entry too small\n");
+        return -1;
+    }
+
+    int msgStart = -1;
+    int msgEnd = -1;
+
+    int i;
+    for (i = 1; i < buf->len; i++) {
+        if (buf->msg[i] == '\0') {
+            if (msgStart == -1) {
+                msgStart = i + 1;
+            } else {
+                msgEnd = i;
+                break;
+            }
+        }
+    }
+
+    if (msgStart == -1) {
+        fprintf(stderr, "+++ LOG: malformed log message\n");
+        return -1;
+    }
+    if (msgEnd == -1) {
+        // incoming message not null-terminated; force it
+        msgEnd = buf->len - 1;
+        buf->msg[msgEnd] = '\0';
+    }
+
+    entry->priority = buf->msg[0];
     entry->tag = buf->msg + 1;
-    tag_len = strlen(entry->tag);
-    entry->messageLen = buf->len - tag_len - 3;
-    entry->message = entry->tag + tag_len + 1;
+    entry->message = buf->msg + msgStart;
+    entry->messageLen = msgEnd - msgStart;
 
     return 0;
 }
@@ -872,7 +913,6 @@ char *android_log_formatLogLine (
         while(pm < (entry->message + entry->messageLen)) {
             const char *lineStart;
             size_t lineLen;
-
             lineStart = pm;
 
             // Find the next end-of-line in message

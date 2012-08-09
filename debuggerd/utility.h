@@ -36,6 +36,7 @@ typedef struct mapinfo {
     unsigned exidx_start;
     unsigned exidx_end;
     struct symbol_table *symbols;
+    bool isExecutable;
     char name[];
 } mapinfo;
 
@@ -56,11 +57,23 @@ const char *map_to_name(mapinfo *mi, unsigned pc, const char* def);
 /* Log information onto the tombstone */
 extern void _LOG(int tfd, bool in_tombstone_only, const char *fmt, ...);
 
+/* Determine whether si_addr is valid for this signal */
+bool signal_has_address(int sig);
+
 #define LOG(fmt...) _LOG(-1, 0, fmt)
+
+/* Set to 1 for normal debug traces */
 #if 0
 #define XLOG(fmt...) _LOG(-1, 0, fmt)
 #else
 #define XLOG(fmt...) do {} while(0)
+#endif
+
+/* Set to 1 for chatty debug traces. Includes all resolved dynamic symbols */
+#if 0
+#define XLOG2(fmt...) _LOG(-1, 0, fmt)
+#else
+#define XLOG2(fmt...) do {} while(0)
 #endif
 
 #endif

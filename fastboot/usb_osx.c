@@ -231,8 +231,7 @@ static int try_interfaces(IOUSBDeviceInterface182 **dev, usb_handle *handle) {
                 kr = (*interface)->ClearPipeStallBothEnds(interface,
                         handle->bulkIn);
                 if (kr != 0) {
-                    ERR("could not clear input pipe; result %d", kr);
-                    return -1;
+                    ERR("could not clear input pipe; result %x, ignoring...\n", kr);
                 }
             }
 
@@ -240,8 +239,7 @@ static int try_interfaces(IOUSBDeviceInterface182 **dev, usb_handle *handle) {
                 kr = (*interface)->ClearPipeStallBothEnds(interface,
                         handle->bulkOut);
                 if (kr != 0) {
-                    ERR("could not clear output pipe; result %d", kr);
-                    return -1;
+                    ERR("could not clear output pipe; result %x, ignoring....\n", kr);
                 }
             }
             
@@ -333,8 +331,7 @@ static int try_device(io_service_t device, usb_handle *handle) {
         req.bmRequestType = USBmakebmRequestType(kUSBIn, kUSBStandard, kUSBDevice);
         req.bRequest = kUSBRqGetDescriptor;
         req.wValue = (kUSBStringDesc << 8) | serialIndex;
-        //language ID (en-us) for serial number string
-        req.wIndex = 0x0409;
+        req.wIndex = 0;
         req.pData = buffer;
         req.wLength = sizeof(buffer);
         kr = (*dev)->DeviceRequest(dev, &req);

@@ -31,47 +31,14 @@
 #define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
 #include <sys/_system_properties.h>
 
-static int send_prop_msg(prop_msg *msg)
-{
-    int s;
-    int r;
-    
-    s = socket_local_client(PROP_SERVICE_NAME, 
-                            ANDROID_SOCKET_NAMESPACE_RESERVED,
-                            SOCK_STREAM);
-    if(s < 0) return -1;
-    
-    while((r = send(s, msg, sizeof(prop_msg), 0)) < 0) {
-        if((errno == EINTR) || (errno == EAGAIN)) continue;
-        break;
-    }
-
-    if(r == sizeof(prop_msg)) {
-        r = 0;
-    } else {
-        r = -1;
-    }
-
-    close(s);
-    return r;
-}
-
 int property_set(const char *key, const char *value)
 {
-    prop_msg msg;
-    unsigned resp;
+    return __system_property_set(key, value);
+}
 
-    if(key == 0) return -1;
-    if(value == 0) value = "";
-    
-    if(strlen(key) >= PROP_NAME_MAX) return -1;
-    if(strlen(value) >= PROP_VALUE_MAX) return -1;
-
-    msg.cmd = PROP_MSG_SETPROP;
-    strcpy((char*) msg.name, key);
-    strcpy((char*) msg.value, value);
-
-    return send_prop_msg(&msg);
+int property_set_sync(const char *key, const char *value)
+{
+    return __system_property_set(key, value);
 }
 
 int property_get(const char *key, char *value, const char *default_value)
@@ -82,7 +49,7 @@ int property_get(const char *key, char *value, const char *default_value)
     if(len > 0) {
         return len;
     }
-
+    
     if(default_value) {
         len = strlen(default_value);
         memcpy(value, default_value, len + 1);
@@ -97,7 +64,7 @@ int property_list(void (*propfn)(const char *key, const char *value, void *cooki
     char value[PROP_VALUE_MAX];
     const prop_info *pi;
     unsigned n;
-
+    
     for(n = 0; (pi = __system_property_find_nth(n)); n++) {
         __system_property_read(pi, name, value);
         propfn(name, value, cookie);
@@ -133,8 +100,11 @@ static int connectToServer(const char* fileName)
     int sock = -1;
     int cc;
 
-    struct sockaddr_un addr;
-
+    union {
+        struct sockaddr_un un;
+        struct sockaddr generic;
+    } addr;
+    
     sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) {
         LOGW("UNIX domain socket create failed (errno=%d)\n", errno);
@@ -142,9 +112,9 @@ static int connectToServer(const char* fileName)
     }
 
     /* connect to socket; fails if file doesn't exist */
-    strcpy(addr.sun_path, fileName);    // max 108 bytes
-    addr.sun_family = AF_UNIX;
-    cc = connect(sock, (struct sockaddr*) &addr, SUN_LEN(&addr));
+    strcpy(addr.un.sun_path, fileName);    // max 108 bytes
+    addr.un.sun_family = AF_UNIX;
+    cc = connect(sock, &addr.generic, SUN_LEN(&addr.un));
     if (cc < 0) {
         // ENOENT means socket file doesn't exist
         // ECONNREFUSED means socket exists but nobody is listening

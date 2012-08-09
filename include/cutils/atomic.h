@@ -90,13 +90,6 @@ void android_atomic_acquire_store(int32_t value, volatile int32_t* addr);
 void android_atomic_release_store(int32_t value, volatile int32_t* addr);
 
 /*
- * Unconditional swap operation with release ordering.
- *
- * Stores the new value at *addr, and returns the previous value.
- */
-int32_t android_atomic_swap(int32_t value, volatile int32_t* addr);
-
-/*
  * Compare-and-set operation with "acquire" or "release" ordering.
  *
  * This returns zero if the new value was successfully stored, which will
@@ -112,12 +105,6 @@ int android_atomic_acquire_cas(int32_t oldvalue, int32_t newvalue,
         volatile int32_t* addr);
 int android_atomic_release_cas(int32_t oldvalue, int32_t newvalue,
         volatile int32_t* addr);
-#if defined(__ARM_ARCH__) || defined (__ARM_EABI__)
-int android_atomic_cmpxchg(int32_t oldvalue, int32_t newvalue,
-        volatile int32_t* addr);
-#else
-#define android_atomic_cmpxchg android_atomic_release_cas
-#endif
 
 /*
  * Aliases for code using an older version of this header.  These are now
@@ -125,6 +112,7 @@ int android_atomic_cmpxchg(int32_t oldvalue, int32_t newvalue,
  * in a future release.
  */
 #define android_atomic_write android_atomic_release_store
+#define android_atomic_cmpxchg android_atomic_release_cas
 
 #ifdef __cplusplus
 } // extern "C"

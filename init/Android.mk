@@ -22,21 +22,20 @@ LOCAL_SRC_FILES += bootchart.c
 LOCAL_CFLAGS    += -DBOOTCHART=1
 endif
 
-ifeq ($(TARGET_HAS_ANCIENT_MSMCAMERA), true)
-    LOCAL_CFLAGS += -DNO_MSM_CAMDIR
+ifeq ($(TARGET_NO_INITLOGO),true)
+LOCAL_CFLAGS += -DNO_INITLOGO
 endif
 
-ifeq ($(BOARD_PROVIDES_BOOTMODE), true)
-    LOCAL_CFLAGS += -DBOARD_PROVIDES_BOOTMODE
-endif
+SYSTEM_CORE_INIT_DEFINES := \
+		BOARD_CHARGING_MODE_BOOTING_LPM \
+		BOARD_CHARGING_CMDLINE_NAME \
+		BOARD_CHARGING_CMDLINE_VALUE
 
-ifneq ($(TARGET_RECOVERY_PRE_COMMAND),)
-	LOCAL_CFLAGS += -DRECOVERY_PRE_COMMAND='$(TARGET_RECOVERY_PRE_COMMAND)'
-endif
-
-ifeq ($(BOARD_HAS_EXTRA_SYS_PROPS), true)
-    LOCAL_CFLAGS += -DBOARD_HAS_EXTRA_SYS_PROPS
-endif
+$(foreach system_core_init_define,$(SYSTEM_CORE_INIT_DEFINES), \
+  $(if $($(system_core_init_define)), \
+    $(eval LOCAL_CFLAGS += -D$(system_core_init_define)=\"$($(system_core_init_define))\") \
+  ) \
+  )
 
 LOCAL_MODULE:= init
 

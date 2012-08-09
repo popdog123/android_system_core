@@ -45,6 +45,8 @@
 #include "util.h"
 #include "log.h"
 
+#include <device_perms.h>
+
 #define PERSISTENT_PROPERTY_DIR  "/data/property"
 
 static int persistent_properties_loaded = 0;
@@ -53,6 +55,7 @@ static int property_area_inited = 0;
 static int property_set_fd = -1;
 
 /* White list of permissions for setting property services. */
+#ifndef PROPERTY_PERMS
 struct {
     const char *prefix;
     unsigned int uid;
@@ -61,11 +64,14 @@ struct {
     { "net.rmnet",        AID_RADIO,    0 },
     { "net.gprs.",        AID_RADIO,    0 },
     { "net.ppp",          AID_RADIO,    0 },
+    { "net.qmi",          AID_RADIO,    0 },
+    { "net.lte",          AID_RADIO,    0 },
+    { "net.cdma",         AID_RADIO,    0 },
     { "ril.",             AID_RADIO,    0 },
     { "gsm.",             AID_RADIO,    0 },
     { "persist.radio",    AID_RADIO,    0 },
     { "net.dns",          AID_RADIO,    0 },
-    { "net.gannet",       AID_RADIO,    0 },
+    { "sys.usb.config",   AID_RADIO,    0 },
     { "net.",             AID_SYSTEM,   0 },
     { "dev.",             AID_SYSTEM,   0 },
     { "runtime.",         AID_SYSTEM,   0 },
@@ -76,46 +82,36 @@ struct {
     { "wlan.",            AID_SYSTEM,   0 },
     { "dhcp.",            AID_SYSTEM,   0 },
     { "dhcp.",            AID_DHCP,     0 },
-    { "vpn.",             AID_SYSTEM,   0 },
-    { "vpn.",             AID_VPN,      0 },
     { "debug.",           AID_SHELL,    0 },
     { "log.",             AID_SHELL,    0 },
     { "service.adb.root", AID_SHELL,    0 },
+    { "service.adb.tcp.port", AID_SHELL,    0 },
     { "persist.sys.",     AID_SYSTEM,   0 },
     { "persist.service.", AID_SYSTEM,   0 },
     { "persist.service.", AID_RADIO,    0 },
     { "persist.security.",AID_SYSTEM,   0 },
-    { "wimax.",           AID_SYSTEM,   1000 },
-    { "net.pdp0",         AID_RADIO,    0 },
-    { "net.pdp1",         AID_RADIO,    AID_RADIO },
-    { "net.pdp2",         AID_RADIO,    AID_RADIO },
-    { "net.pdp3",         AID_RADIO,    AID_RADIO },
-    { "net.pdp4",         AID_RADIO,    AID_RADIO },
-    { "net.vsnet0",       AID_RADIO,    AID_RADIO },
-    { "net.vsnet1",       AID_RADIO,    AID_RADIO },
-    { "net.vsnet2",       AID_RADIO,    AID_RADIO },
-    { "net.vsnet3",       AID_RADIO,    AID_RADIO },
+    { "net.pdp",          AID_RADIO,    AID_RADIO },
     { NULL, 0, 0 }
 };
+/* Avoid extending this array. Check device_perms.h */
+#endif
 
 /*
  * White list of UID that are allowed to start/stop services.
  * Currently there are no user apps that require.
  */
+#ifndef CONTROL_PERMS
 struct {
     const char *service;
     unsigned int uid;
     unsigned int gid;
 } control_perms[] = {
-    { "dumpstate",   AID_SHELL, AID_LOG   },
-    { "rawip_vsnet1",AID_RADIO, AID_RADIO },
-    { "rawip_vsnet2",AID_RADIO, AID_RADIO },
-    { "rawip_vsnet3",AID_RADIO, AID_RADIO },
-    { "rawip_vsnet4",AID_RADIO, AID_RADIO },
-    { "rawip_rmnet1",AID_RADIO, AID_RADIO },
-    { "rmnet1_down", AID_RADIO, AID_RADIO },
+    { "dumpstate",AID_SHELL, AID_LOG },
+    { "ril-daemon",AID_RADIO, AID_RADIO },
      {NULL, 0, 0 }
 };
+/* Avoid extending this array. Check device_perms.h */
+#endif
 
 typedef struct {
     void *data;
@@ -160,23 +156,12 @@ out:
     return -1;
 }
 
-/* (8 header words + 247 toc words) = 1020 bytes */
-/* 1024 bytes header and toc + 247 prop_infos @ 128 bytes = 32640 bytes */
+/* (8 header words + 372 toc words) = 1520 bytes */
+/* 1536 bytes header and toc + 372 prop_infos @ 128 bytes = 49152 bytes */
 
-#ifdef BOARD_HAS_EXTRA_SYS_PROPS
-/* This is for boards that have an excessive number of system props set. */
-
-#define PA_COUNT_MAX  494
-#define PA_INFO_START 2048
-#define PA_SIZE       65536
-
-#else
-
-#define PA_COUNT_MAX  247
-#define PA_INFO_START 1024
-#define PA_SIZE       32768
-
-#endif
+#define PA_COUNT_MAX  372
+#define PA_INFO_START 1536
+#define PA_SIZE       49152
 
 static workspace pa_workspace;
 static prop_info *pa_info_array;
@@ -215,15 +200,6 @@ static void update_prop_info(prop_info *pi, const char *value, unsigned len)
     pi->serial = (len << 24) | ((pi->serial + 1) & 0xffffff);
     __futex_wake(&pi->serial, INT32_MAX);
 }
-
-static int property_write(prop_info *pi, const char *value)
-{
-    int valuelen = strlen(value);
-    if(valuelen >= PROP_VALUE_MAX) return -1;
-    update_prop_info(pi, value, valuelen);
-    return 0;
-}
-
 
 /*
  * Checks permissions for starting/stoping system services.
@@ -410,11 +386,11 @@ void handle_property_set_fd()
         return;
     }
 
-    r = recv(s, &msg, sizeof(msg), 0);
-        close(s);
+    r = TEMP_FAILURE_RETRY(recv(s, &msg, sizeof(msg), 0));
     if(r != sizeof(prop_msg)) {
-        ERROR("sys_prop: mis-match msg size recieved: %d expected: %d\n",
-              r, sizeof(prop_msg));
+        ERROR("sys_prop: mis-match msg size recieved: %d expected: %d errno: %d\n",
+              r, sizeof(prop_msg), errno);
+        close(s);
         return;
     }
 
@@ -424,11 +400,14 @@ void handle_property_set_fd()
         msg.value[PROP_VALUE_MAX-1] = 0;
 
         if(memcmp(msg.name,"ctl.",4) == 0) {
+            // Keep the old close-socket-early behavior when handling
+            // ctl.* properties.
+            close(s);
             if (check_control_perms(msg.value, cr.uid, cr.gid)) {
                 handle_control_message((char*) msg.name + 4, (char*) msg.value);
             } else {
-                ERROR("sys_prop: Unable to %s service ctl [%s] uid: %d pid:%d\n",
-                        msg.name + 4, msg.value, cr.uid, cr.pid);
+                ERROR("sys_prop: Unable to %s service ctl [%s] uid:%d gid:%d pid:%d\n",
+                        msg.name + 4, msg.value, cr.uid, cr.gid, cr.pid);
             }
         } else {
             if (check_perms(msg.name, cr.uid, cr.gid)) {
@@ -437,10 +416,16 @@ void handle_property_set_fd()
                 ERROR("sys_prop: permission denied uid:%d  name:%s\n",
                       cr.uid, msg.name);
             }
+
+            // Note: bionic's property client code assumes that the
+            // property server will not close the socket until *AFTER*
+            // the property is written to memory.
+            close(s);
         }
         break;
 
     default:
+        close(s);
         break;
     }
 }
@@ -531,15 +516,28 @@ static void load_persistent_properties()
     persistent_properties_loaded = 1;
 }
 
-void property_init(void)
+void property_init(bool load_defaults)
 {
     init_property_area();
-    load_properties_from_file(PROP_PATH_RAMDISK_DEFAULT);
+    if (load_defaults)
+        load_properties_from_file(PROP_PATH_RAMDISK_DEFAULT);
 }
 
 int properties_inited(void)
 {
     return property_area_inited;
+}
+
+/* When booting an encrypted system, /data is not mounted when the
+ * property service is started, so any properties stored there are
+ * not loaded.  Vold triggers init to load these properties once it
+ * has mounted /data.
+ */
+void load_persist_props(void)
+{
+    load_properties_from_file(PROP_PATH_LOCAL_OVERRIDE);
+    /* Read persistent properties after all default values have been loaded. */
+    load_persistent_properties();
 }
 
 void start_property_service(void)

@@ -96,7 +96,7 @@
 /*
  * Define this if you have <termio.h>
  */
-#define  HAVE_TERMIO_H
+#define  HAVE_TERMIO_H 1
 
 /*
  * Define this if you have <sys/sendfile.h>
@@ -111,7 +111,7 @@
 /*
  * Define this if you have sys/uio.h
  */
-#define  HAVE_SYS_UIO_H
+#define  HAVE_SYS_UIO_H 1
 
 /*
  * Define this if your platforms implements symbolic links
@@ -172,6 +172,11 @@
  */
 /* #define _FILE_OFFSET_BITS 64 */
 /* #define _LARGEFILE_SOURCE 1 */
+
+/*
+ * Define if platform has off64_t (and lseek64 and other xxx64 functions)
+ */
+#define HAVE_OFF64_T
 
 /*
  * Defined if we have the backtrace() call for retrieving a stack trace.

@@ -23,14 +23,15 @@
 #include <linux/kd.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <linux/if.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
-#include <sys/wait.h>
 #include <linux/loop.h>
+#include <cutils/partition_utils.h>
 
 #include "init.h"
 #include "keywords.h"
@@ -67,6 +68,49 @@ static int write_file(const char *path, const char *value)
     } else {
         return 0;
     }
+}
+
+
+static int _chown(const char *path, unsigned int uid, unsigned int gid)
+{
+    int ret;
+
+    struct stat p_statbuf;
+
+    ret = lstat(path, &p_statbuf);
+    if (ret < 0) {
+        return -1;
+    }
+
+    if (S_ISLNK(p_statbuf.st_mode) == 1) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    ret = chown(path, uid, gid);
+
+    return ret;
+}
+
+static int _chmod(const char *path, mode_t mode)
+{
+    int ret;
+
+    struct stat p_statbuf;
+
+    ret = lstat(path, &p_statbuf);
+    if (ret < 0) {
+        return -1;
+    }
+
+    if (S_ISLNK(p_statbuf.st_mode) == 1) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    ret = chmod(path, mode);
+
+    return ret;
 }
 
 static int insmod(const char *filename, char *options)
@@ -163,6 +207,12 @@ int do_class_stop(int nargs, char **args)
     return 0;
 }
 
+int do_class_reset(int nargs, char **args)
+{
+    service_for_each_class(args[1], service_reset);
+    return 0;
+}
+
 int do_domainname(int nargs, char **args)
 {
     return write_file("/proc/sys/kernel/domainname", args[1]);
@@ -197,11 +247,11 @@ int do_exec(int nargs, char **args)
     }
     else
     {
-        waitpid(pid, &status, 0);
+        while (waitpid(pid, &status, 0) == -1 && errno == EINTR);
         if (WEXITSTATUS(status) != 0) {
             ERROR("exec: pid %1d exited with return code %d: %s", (int)pid, WEXITSTATUS(status), strerror(status));
         }
-        
+
     }
     return 0;
 }
@@ -253,14 +303,36 @@ int do_insmod(int nargs, char **args)
     return do_insmod_inner(nargs, args, size);
 }
 
-int do_import(int nargs, char **args)
+int do_log(int nargs, char **args)
 {
-    return init_parse_config_file(args[1]);
+    char* par[nargs+3];
+    char* value;
+    int i;
+
+    par[0] = "exec";
+    par[1] = "/system/bin/log";
+    par[2] = "-tinit";
+    for (i = 1; i < nargs; ++i) {
+        value = args[i];
+        if (value[0] == '$') {
+            /* system property if value starts with '$' */
+            value++;
+            if (value[0] != '$') {
+                value = (char*) property_get(value);
+                if (!value) value = args[i];
+            }
+        }
+        par[i+2] = value;
+    }
+    par[nargs+2] = NULL;
+
+    return do_exec(nargs+2, par);
 }
 
 int do_mkdir(int nargs, char **args)
 {
     mode_t mode = 0755;
+    int ret;
 
     /* mkdir <path> [mode] [owner] [group] */
 
@@ -268,7 +340,12 @@ int do_mkdir(int nargs, char **args)
         mode = strtoul(args[2], 0, 8);
     }
 
-    if (mkdir(args[1], mode)) {
+    ret = mkdir(args[1], mode);
+    /* chmod in case the directory already exists */
+    if (ret == -1 && errno == EEXIST) {
+        ret = _chmod(args[1], mode);
+    }
+    if (ret == -1) {
         return -errno;
     }
 
@@ -280,7 +357,7 @@ int do_mkdir(int nargs, char **args)
             gid = decode_uid(args[4]);
         }
 
-        if (chown(args[1], uid, gid)) {
+        if (_chown(args[1], uid, gid) < 0) {
             return -errno;
         }
     }
@@ -292,8 +369,8 @@ static struct {
     const char *name;
     unsigned flag;
 } mount_flags[] = {
-    { "move",       MS_MOVE },
     { "noatime",    MS_NOATIME },
+    { "noexec",     MS_NOEXEC },
     { "nosuid",     MS_NOSUID },
     { "nodev",      MS_NODEV },
     { "nodiratime", MS_NODIRATIME },
@@ -303,6 +380,8 @@ static struct {
     { "defaults",   0 },
     { 0,            0 },
 };
+
+#define DATA_MNT_POINT "/data"
 
 /* mount <type> <device> <path> <flags ...> <options> */
 int do_mount(int nargs, char **args)
@@ -349,7 +428,7 @@ int do_mount(int nargs, char **args)
             return -1;
         }
 
-        return 0;
+        goto exit_success;
     } else if (!strncmp(source, "loop@", 5)) {
         int mode, loop, fd;
         struct loop_info info;
@@ -380,7 +459,7 @@ int do_mount(int nargs, char **args)
                     }
 
                     close(loop);
-                    return 0;
+                    goto exit_success;
                 }
             }
 
@@ -394,11 +473,70 @@ int do_mount(int nargs, char **args)
         if (wait)
             wait_for_file(source, COMMAND_RETRY_TIMEOUT);
         if (mount(source, target, system, flags, options) < 0) {
-            return -1;
+            /* If this fails, it may be an encrypted filesystem
+             * or it could just be wiped.  If wiped, that will be
+             * handled later in the boot process.
+             * We only support encrypting /data.  Check
+             * if we're trying to mount it, and if so,
+             * assume it's encrypted, mount a tmpfs instead.
+             * Then save the orig mount parms in properties
+             * for vold to query when it mounts the real
+             * encrypted /data.
+             */
+            if (!strcmp(target, DATA_MNT_POINT) && !partition_wiped(source)) {
+                const char *tmpfs_options;
+
+                tmpfs_options = property_get("ro.crypto.tmpfs_options");
+
+                if (mount("tmpfs", target, "tmpfs", MS_NOATIME | MS_NOSUID | MS_NODEV,
+                    tmpfs_options) < 0) {
+                    return -1;
+                }
+
+                /* Set the property that triggers the framework to do a minimal
+                 * startup and ask the user for a password
+                 */
+                property_set("ro.crypto.state", "encrypted");
+                property_set("vold.decrypt", "1");
+            } else {
+                return -1;
+            }
         }
 
-        return 0;
+        if (!strcmp(target, DATA_MNT_POINT)) {
+            char fs_flags[32];
+
+            /* Save the original mount options */
+            property_set("ro.crypto.fs_type", system);
+            property_set("ro.crypto.fs_real_blkdev", source);
+            property_set("ro.crypto.fs_mnt_point", target);
+            if (options) {
+                property_set("ro.crypto.fs_options", options);
+            }
+            snprintf(fs_flags, sizeof(fs_flags), "0x%8.8x", flags);
+            property_set("ro.crypto.fs_flags", fs_flags);
+        }
     }
+
+exit_success:
+    /* If not running encrypted, then set the property saying we are
+     * unencrypted, and also trigger the action for a nonencrypted system.
+     */
+    if (!strcmp(target, DATA_MNT_POINT)) {
+        const char *prop;
+
+        prop = property_get("ro.crypto.state");
+        if (! prop) {
+            prop = "notset";
+        }
+        if (strcmp(prop, "encrypted")) {
+            property_set("ro.crypto.state", "unencrypted");
+            action_for_each_trigger("nonencrypted", action_add_queue_tail);
+        }
+    }
+
+    return 0;
+
 }
 
 int do_setkey(int nargs, char **args)
@@ -412,7 +550,24 @@ int do_setkey(int nargs, char **args)
 
 int do_setprop(int nargs, char **args)
 {
-    property_set(args[1], args[2]);
+    const char *name = args[1];
+    const char *value = args[2];
+
+    if (value[0] == '$') {
+        /* Use the value of a system property if value starts with '$' */
+        value++;
+        if (value[0] != '$') {
+            value = property_get(value);
+            if (!value) {
+                ERROR("property %s has no value for assigning to %s\n", value, name);
+                return -EINVAL;
+            }
+        } /* else fall through to support double '$' prefix for setting properties
+           * to string literals that start with '$'
+           */
+    }
+
+    property_set(name, value);
     return 0;
 }
 
@@ -451,8 +606,7 @@ int do_restart(int nargs, char **args)
     struct service *svc;
     svc = service_find_by_name(args[1]);
     if (svc) {
-        service_stop(svc);
-        service_start(svc, NULL);
+        service_restart(svc);
     }
     return 0;
 }
@@ -466,6 +620,16 @@ int do_trigger(int nargs, char **args)
 int do_symlink(int nargs, char **args)
 {
     return symlink(args[1], args[2]);
+}
+
+int do_rm(int nargs, char **args)
+{
+    return unlink(args[1]);
+}
+
+int do_rmdir(int nargs, char **args)
+{
+    return rmdir(args[1]);
 }
 
 int do_sysclktz(int nargs, char **args)
@@ -484,7 +648,23 @@ int do_sysclktz(int nargs, char **args)
 
 int do_write(int nargs, char **args)
 {
-    return write_file(args[1], args[2]);
+    const char *path = args[1];
+    const char *value = args[2];
+    if (value[0] == '$') {
+        /* Write the value of a system property if value starts with '$' */
+        value++;
+        if (value[0] != '$') {
+            value = property_get(value);
+            if (!value) {
+                ERROR("property %s has no value for writing to %s\n", value, path);
+                return -EINVAL;
+            }
+        } /* else fall through to support double '$' prefix for writing
+           * string literals that start with '$'
+           */
+    }
+
+    return write_file(path, value);
 }
 
 int do_copy(int nargs, char **args)
@@ -552,10 +732,10 @@ out:
 int do_chown(int nargs, char **args) {
     /* GID is optional. */
     if (nargs == 3) {
-        if (chown(args[2], decode_uid(args[1]), -1) < 0)
+        if (_chown(args[2], decode_uid(args[1]), -1) < 0)
             return -errno;
     } else if (nargs == 4) {
-        if (chown(args[3], decode_uid(args[1]), decode_uid(args[2])))
+        if (_chown(args[3], decode_uid(args[1]), decode_uid(args[2])) < 0)
             return -errno;
     } else {
         return -1;
@@ -578,7 +758,7 @@ static mode_t get_mode(const char *s) {
 
 int do_chmod(int nargs, char **args) {
     mode_t mode = get_mode(args[1]);
-    if (chmod(args[2], mode) < 0) {
+    if (_chmod(args[2], mode) < 0) {
         return -errno;
     }
     return 0;
@@ -586,7 +766,15 @@ int do_chmod(int nargs, char **args) {
 
 int do_loglevel(int nargs, char **args) {
     if (nargs == 2) {
-        log_set_level(atoi(args[1]));
+        klog_set_level(atoi(args[1]));
+        return 0;
+    }
+    return -1;
+}
+
+int do_load_persist_props(int nargs, char **args) {
+    if (nargs == 1) {
+        load_persist_props();
         return 0;
     }
     return -1;
@@ -601,6 +789,5 @@ int do_wait(int nargs, char **args)
 }
 
 int do_umount(int nargs, char **args) {
-    return umount(args[1]);
+	return umount(args[1]);
 }
-

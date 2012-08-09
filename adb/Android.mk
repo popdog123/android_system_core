@@ -16,7 +16,7 @@ EXTRA_SRCS :=
 ifeq ($(HOST_OS),linux)
   USB_SRCS := usb_linux.c
   EXTRA_SRCS := get_my_path_linux.c
-  LOCAL_LDLIBS += -lrt -lpthread
+  LOCAL_LDLIBS += -lrt -lncurses -lpthread
 endif
 
 ifeq ($(HOST_OS),darwin)
@@ -72,7 +72,16 @@ else
   LOCAL_SRC_FILES += fdevent.c
 endif
 
-LOCAL_CFLAGS += -O2 -g -DADB_HOST=1  -Wall -Wno-unused-parameter
+LOCAL_CFLAGS += -g -DADB_HOST=1  -Wall -Wno-unused-parameter
+# adb can't be built without optimizations, so we enforce -O2 if no
+# other optimization flag is set - but we don't override what the global
+# flags are saying if something else is given (-Os or -O3 are useful)
+ifeq ($(findstring -O, $(HOST_GLOBAL_CFLAGS)),)
+LOCAL_CFLAGS += -O2
+endif
+ifneq ($(findstring -O0, $(HOST_GLOBAL_CFLAGS)),)
+LOCAL_CFLAGS += -O2
+endif
 LOCAL_CFLAGS += -D_XOPEN_SOURCE -D_GNU_SOURCE
 LOCAL_MODULE := adb
 
@@ -83,7 +92,7 @@ endif
 
 include $(BUILD_HOST_EXECUTABLE)
 
-$(call dist-for-goals,droid,$(LOCAL_BUILT_MODULE))
+$(call dist-for-goals,dist_files,$(LOCAL_BUILT_MODULE))
 
 ifeq ($(HOST_OS),windows)
 $(LOCAL_INSTALLED_MODULE): \
@@ -95,11 +104,7 @@ endif
 # adbd device daemon
 # =========================================================
 
-# build adbd in all non-simulator builds
-BUILD_ADBD := false
-ifneq ($(TARGET_SIMULATOR),true)
-    BUILD_ADBD := true
-endif
+BUILD_ADBD := true
 
 # build adbd for the Linux simulator build
 # so we can use it to test the adb USB gadget driver on x86
@@ -113,6 +118,7 @@ include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
 	adb.c \
+	backup_service.c \
 	fdevent.c \
 	transport.c \
 	transport_local.c \
@@ -127,21 +133,22 @@ LOCAL_SRC_FILES := \
 	log_service.c \
 	utils.c
 
-LOCAL_CFLAGS := -O2 -g -DADB_HOST=0 -Wall -Wno-unused-parameter
+LOCAL_CFLAGS := -g -DADB_HOST=0 -Wall -Wno-unused-parameter
+# adb can't be built without optimizations, so we enforce -O2 if no
+# other optimization flag is set - but we don't override what the global
+# flags are saying if something else is given (-Os or -O3 are useful)
+ifeq ($(findstring -O, $(TARGET_GLOBAL_CFLAGS)),)
+LOCAL_CFLAGS += -O2
+endif
+ifneq ($(findstring -O0, $(TARGET_GLOBAL_CFLAGS)),)
+LOCAL_CFLAGS += -O2
+endif
 LOCAL_CFLAGS += -D_XOPEN_SOURCE -D_GNU_SOURCE
 
 # TODO: This should probably be board specific, whether or not the kernel has
 # the gadget driver; rather than relying on the architecture type.
 ifeq ($(TARGET_ARCH),arm)
 LOCAL_CFLAGS += -DANDROID_GADGET=1
-endif
-
-ifneq ($(TARGET_RECOVERY_PRE_COMMAND),)
-	LOCAL_CFLAGS += -DRECOVERY_PRE_COMMAND='$(TARGET_RECOVERY_PRE_COMMAND)'
-endif
-
-ifeq ($(BOARD_USE_SCREENCAP),true)
-	LOCAL_CFLAGS += -DUSE_SCREENCAP
 endif
 
 ifeq ($(BOARD_ALWAYS_INSECURE),true)
@@ -154,13 +161,58 @@ LOCAL_FORCE_STATIC_EXECUTABLE := true
 LOCAL_MODULE_PATH := $(TARGET_ROOT_OUT_SBIN)
 LOCAL_UNSTRIPPED_PATH := $(TARGET_ROOT_OUT_SBIN_UNSTRIPPED)
 
-ifeq ($(TARGET_SIMULATOR),true)
-  LOCAL_STATIC_LIBRARIES := libcutils
-  LOCAL_LDLIBS += -lpthread
-  include $(BUILD_HOST_EXECUTABLE)
-else
-  LOCAL_STATIC_LIBRARIES := libcutils libc
-  include $(BUILD_EXECUTABLE)
+LOCAL_STATIC_LIBRARIES := libcutils libc
+include $(BUILD_EXECUTABLE)
+
 endif
 
+
+# adb host tool for device-as-host
+# =========================================================
+ifneq ($(SDK_ONLY),true)
+include $(CLEAR_VARS)
+
+LOCAL_LDLIBS := -lrt -lncurses -lpthread
+
+LOCAL_SRC_FILES := \
+	adb.c \
+	console.c \
+	transport.c \
+	transport_local.c \
+	transport_usb.c \
+	commandline.c \
+	adb_client.c \
+	sockets.c \
+	services.c \
+	file_sync_client.c \
+	get_my_path_linux.c \
+	usb_linux.c \
+	utils.c \
+	usb_vendors.c \
+	fdevent.c
+
+LOCAL_CFLAGS := \
+	-g \
+	-DADB_HOST=1 \
+	-DADB_HOST_ON_TARGET=1 \
+	-Wall \
+	-Wno-unused-parameter \
+	-D_XOPEN_SOURCE \
+	-D_GNU_SOURCE
+
+# adb can't be built without optimizations, so we enforce -O2 if no
+# other optimization flag is set - but we don't override what the global
+# flags are saying if something else is given (-Os or -O3 are useful)
+ifeq ($(findstring -O, $(TARGET_GLOBAL_CFLAGS)),)
+LOCAL_CFLAGS += -O2
+endif
+ifneq ($(findstring -O0, $(TARGET_GLOBAL_CFLAGS)),)
+LOCAL_CFLAGS += -O2
+endif
+
+LOCAL_MODULE := adb
+
+LOCAL_STATIC_LIBRARIES := libzipfile libunz libcutils
+
+include $(BUILD_EXECUTABLE)
 endif
